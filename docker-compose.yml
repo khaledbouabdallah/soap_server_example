@@ -1,0 +1,107 @@
+services:
+
+  # Container 1: PostgreSQL Database
+  db:
+    image: postgres:18-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: solvency_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d solvency_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Container 2: Orchestration Service (Public SOAP Gateway)
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile_app
+    container_name: solvency_orchestrator
+    command: python loan_solvency_service/services/orchestration/run_orchestrator.py
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/solvency_db
+      CRUD_SERVICE_URL: http://crud:8000/CRUDAccess?wsdl
+      BUSINESS_SERVICE_URL: http://business:8000/BusinessLogic?wsdl
+      # **NEW: Cache configuration**
+      CACHE_TTL_SECONDS: "300"    # 5 minutes TTL
+      CACHE_MAX_SIZE: "1000"      # Max 1000 entries
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+  # Container 3: Business Logic Services (Internal Computation)
+  business:
+    build:
+      context: .
+      dockerfile: Dockerfile_app
+    container_name: solvency_business
+    command: python loan_solvency_service/services/business_logic/run_business_logic.py
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/solvency_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Container 4: CRUD/Data Access Services (Internal Data Layer)
+  crud:
+    build:
+      context: .
+      dockerfile: Dockerfile_app
+    container_name: solvency_crud
+    command: python loan_solvency_service/services/crud/run_crud_services.py
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/solvency_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Container 5: Prometheus (Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+      - business
+      - crud
+
+  # Container 6: Grafana (Metrics Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

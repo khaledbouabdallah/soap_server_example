@@ -1,0 +1,31 @@
+# Dockerfile_app
+# Used for all Python-based application services (Orchestrator, Business, CRUD)
+
+# 1. Base image (using python:3.10 as an example)
+FROM python:3.10-slim
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# 1. Install UV globally (used for dependency management)
+RUN pip install uv
+
+# 2. Copy the dependency file and source structure necessary for editable install
+# This includes pyproject.toml and the root directory structure.
+# NOTE: The missing 'README.md' and the package directory error are likely due 
+# to the editable install not finding the source code hierarchy.
+COPY pyproject.toml .
+# Copy all source files BEFORE the editable install step
+COPY . .
+
+# 3. Install the project and its dependencies using the editable install option.
+# The '-e .' command reads pyproject.toml's [project].dependencies 
+# and enforces the pinned version (twisted==19.10.0).
+# We use --system because we are installing into the base image environment.
+RUN uv pip install -e . --system
+
+
+# Expose the port where services will run (internal network port)
+EXPOSE 8000
+
+# CMD is defined in docker-compose.yml

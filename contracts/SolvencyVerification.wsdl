@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="SolvencyVerificationService"
+    targetNamespace="urn:solvency.verification.service:v1"
+    xmlns="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:tns="urn:solvency.verification.service:v1"
+    xmlns:tns_data="urn:solvency.verification.service:datatypes:v1">
+
+    <types>
+        <xsd:schema>
+            <xsd:import namespace="urn:solvency.verification.service:datatypes:v1"
+                        schemaLocation="SolvencyDataTypes.xsd"/>
+            <xsd:element name="VerifySolvencyRequest">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="clientId" type="tns_data:ClientId"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+            <xsd:element name="VerifySolvencyResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="SolvencyReport" type="tns_data:SolvencyReport"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+            <xsd:element name="ClientNotFoundFault">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="message" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+            <xsd:element name="ClientValidationErrorFault">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="message" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+        </xsd:schema>
+    </types>
+
+    <message name="VerifySolvencyInput">
+        <part name="parameters" element="tns:VerifySolvencyRequest"/>
+    </message>
+    <message name="VerifySolvencyOutput">
+        <part name="parameters" element="tns:VerifySolvencyResponse"/>
+    </message>
+    <message name="ClientNotFoundFaultMessage">
+        <part name="detail" element="tns:ClientNotFoundFault"/>
+    </message>
+    <message name="ClientValidationErrorFaultMessage">
+        <part name="detail" element="tns:ClientValidationErrorFault"/>
+    </message>
+
+    <portType name="SolvencyVerificationPortType">
+        <operation name="VerifySolvency">
+            <input message="tns:VerifySolvencyInput"/>
+            <output message="tns:VerifySolvencyOutput"/>
+            <fault name="ClientNotFound" message="tns:ClientNotFoundFaultMessage"/>
+            <fault name="ClientValidationError" message="tns:ClientValidationErrorFaultMessage"/>
+        </operation>
+    </portType>
+
+    <binding name="SolvencyVerificationSoapBinding" type="tns:SolvencyVerificationPortType">
+        <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+        <operation name="VerifySolvency">
+            <soap:operation soapAction="urn:solvency.verification.service:v1/VerifySolvency"/>
+            <input>
+                <soap:body use="literal"/>
+            </input>
+            <output>
+                <soap:body use="literal"/>
+            </output>
+            <fault name="ClientNotFound">
+                <soap:fault name="ClientNotFound" use="literal"/>
+            </fault>
+            <fault name="ClientValidationError">
+                <soap:fault name="ClientValidationError" use="literal"/>
+            </fault>
+        </operation>
+    </binding>
+
+    <service name="SolvencyVerificationService">
+        <port name="SolvencyVerificationPort" binding="tns:SolvencyVerificationSoapBinding">
+            <soap:address location="http://localhost:8000/v1/SolvencyVerification"/>
+        </port>
+    </service>
+
+</definitions>

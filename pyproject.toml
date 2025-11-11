@@ -1,0 +1,29 @@
+[project]
+name = "soap-wsdl-service"
+version = "0.1.0"
+description = "Mini project implementing a SOAP web service for loan solvency checking."
+authors = [{name = "Khaled BOUABDALLAH", email = "bouabdallah.khaled@yahoo.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["lxml>=6.0.2",
+                "spyne>=2.14.0",
+                "twisted>=22.8.0",
+                "pydantic>=2.0.0",
+                # DB Dependencies
+                "SQLAlchemy>=2.0.0",
+                "psycopg2-binary>=2.9.0",
+                # SOAP Client
+                "zeep>=4.0.0",
+                # Monitoring
+                "prometheus-client>=0.19.0"
+                ]
+
+optional-dependencies = { dev = ["pytest>=7.0.0",
+                                   "black>=22.0.0",
+                                   "isort>=5.0.0",
+                                   "mypy>=1.0.0",     
+                                   ] }
+
+
+[tool.setuptools]
+packages = ["loan_solvency_service"]

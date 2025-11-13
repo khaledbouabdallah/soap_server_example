@@ -1,0 +1,531 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_SolvencyVerification" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.41.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.0.0">
+  <bpmn:collaboration id="Collaboration_SolvencyVerification">
+    <bpmn:participant id="Participant_Orchestrator" name="Solvency Verification Orchestrator" processRef="Process_Orchestrator" />
+    <bpmn:textAnnotation id="Annotation_Formula">
+      <bpmn:text>Credit Score Formula:
+score = 1000 - (0.1 × debt) - (50 × latePayments) - (hasBankruptcy ? 200 : 0)
+Range: [0, 1000]</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_Formula" sourceRef="Annotation_Formula" targetRef="Task_ComputeScore" />
+    <bpmn:textAnnotation id="Annotation_SLA">
+      <bpmn:text>SLA Targets (Client-Facing):
+- P95 Latency: &lt;300ms
+- P50 Latency: &lt;60ms
+- Availability: 99% uptime
+- Cache reduces latency by 40-60%</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_SLA" sourceRef="Annotation_SLA" targetRef="Task_StartTimer" />
+    <bpmn:textAnnotation id="Annotation_Cache">
+      <bpmn:text>Cache Configuration:
+- TTL: 5 minutes (300s)
+- Max Size: 1000 entries
+- Eviction: LRU policy
+- Keys: identity:{id}, financials:{id}, history:{id}
+- Hit Rate Target: &gt;70%</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_Cache" sourceRef="Annotation_Cache" targetRef="Gateway_ParallelSplit" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Orchestrator" name="VerifySolvency Orchestration" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="Receive VerifySolvency Request">
+      <bpmn:outgoing>Flow_01</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_GenerateCorrelationID" name="Generate Correlation ID (UUID)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="generate-correlation-id" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_01</bpmn:incoming>
+      <bpmn:outgoing>Flow_02</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ValidateClientID" name="Validate Client ID Pattern (client-\d{3})">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="validate-client-id" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_02</bpmn:incoming>
+      <bpmn:outgoing>Flow_03</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ValidPattern" name="Valid Pattern?">
+      <bpmn:incoming>Flow_03</bpmn:incoming>
+      <bpmn:outgoing>Flow_04_Yes</bpmn:outgoing>
+      <bpmn:outgoing>Flow_04_No</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="EndEvent_ValidationError" name="Throw ClientValidationError">
+      <bpmn:incoming>Flow_04_No</bpmn:incoming>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_1" errorRef="Error_ValidationError" />
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_StartTimer" name="Start Performance Timer">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="start-timer" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_04_Yes</bpmn:incoming>
+      <bpmn:outgoing>Flow_05</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="Gateway_ParallelSplit" name="Parallel CRUD Retrieval">
+      <bpmn:incoming>Flow_05</bpmn:incoming>
+      <bpmn:outgoing>Flow_06a</bpmn:outgoing>
+      <bpmn:outgoing>Flow_06b</bpmn:outgoing>
+      <bpmn:outgoing>Flow_06c</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_GetIdentity" name="Get Client Identity&#10;(Check Cache → CRUD Service → Store)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="get-client-identity" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_06a</bpmn:incoming>
+      <bpmn:outgoing>Flow_07a</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="BoundaryError_Identity" name="Client Not Found" attachedToRef="Task_GetIdentity">
+      <bpmn:outgoing>Flow_Error1</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_Identity" errorRef="Error_NotFound" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_GetFinancials" name="Get Client Financials&#10;(Check Cache → CRUD Service → Store)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="get-client-financials" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_06b</bpmn:incoming>
+      <bpmn:outgoing>Flow_07b</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="BoundaryError_Financials" name="Client Not Found" attachedToRef="Task_GetFinancials">
+      <bpmn:outgoing>Flow_Error2</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_Financials" errorRef="Error_NotFound" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_GetHistory" name="Get Credit History&#10;(Check Cache → CRUD Service → Store)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="get-credit-history" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_06c</bpmn:incoming>
+      <bpmn:outgoing>Flow_07c</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="BoundaryError_History" name="Client Not Found" attachedToRef="Task_GetHistory">
+      <bpmn:outgoing>Flow_Error3</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_History" errorRef="Error_NotFound" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_Error1" sourceRef="BoundaryError_Identity" targetRef="Gateway_ErrorMerge" />
+    <bpmn:sequenceFlow id="Flow_Error2" sourceRef="BoundaryError_Financials" targetRef="Gateway_ErrorMerge" />
+    <bpmn:sequenceFlow id="Flow_Error3" sourceRef="BoundaryError_History" targetRef="Gateway_ErrorMerge" />
+    <bpmn:sequenceFlow id="Flow_Error4" sourceRef="Gateway_ErrorMerge" targetRef="Task_LogError" />
+    <bpmn:sequenceFlow id="Flow_Error5" sourceRef="Task_LogError" targetRef="EndEvent_NotFound" />
+    <bpmn:parallelGateway id="Gateway_ParallelJoin" name="All Data Retrieved">
+      <bpmn:incoming>Flow_07a</bpmn:incoming>
+      <bpmn:incoming>Flow_07b</bpmn:incoming>
+      <bpmn:incoming>Flow_07c</bpmn:incoming>
+      <bpmn:outgoing>Flow_08</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_RecordCRUDMetrics" name="Record CRUD Metrics (latency)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-crud-metrics" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_08</bpmn:incoming>
+      <bpmn:outgoing>Flow_09</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ComputeScore" name="Call ComputeCreditScore">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="compute-credit-score" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_09</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_RecordScoreMetric" name="Record Score Metric">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-score-metric" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_MakeDecision" name="Call DecideSolvency&#10;Rule: (score ≥ 700) AND (income &#62; expenses)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="decide-solvency" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_RecordDecisionMetric" name="Record Decision Metric">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-decision-metric" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_GenerateExplanations" name="Call Explain&#10;Generate 3 Explanations">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="generate-explanations" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_RecordExplanationMetric" name="Record Explanation Metric">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-explanation-metric" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_15</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_01" sourceRef="StartEvent_1" targetRef="Task_GenerateCorrelationID" />
+    <bpmn:sequenceFlow id="Flow_02" sourceRef="Task_GenerateCorrelationID" targetRef="Task_ValidateClientID" />
+    <bpmn:sequenceFlow id="Flow_03" sourceRef="Task_ValidateClientID" targetRef="Gateway_ValidPattern" />
+    <bpmn:sequenceFlow id="Flow_04_Yes" name="YES" sourceRef="Gateway_ValidPattern" targetRef="Task_StartTimer">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=patternValid = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_04_No" name="NO" sourceRef="Gateway_ValidPattern" targetRef="EndEvent_ValidationError">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=patternValid = false</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_05" sourceRef="Task_StartTimer" targetRef="Gateway_ParallelSplit" />
+    <bpmn:sequenceFlow id="Flow_06a" sourceRef="Gateway_ParallelSplit" targetRef="Task_GetIdentity" />
+    <bpmn:sequenceFlow id="Flow_06b" sourceRef="Gateway_ParallelSplit" targetRef="Task_GetFinancials" />
+    <bpmn:sequenceFlow id="Flow_06c" sourceRef="Gateway_ParallelSplit" targetRef="Task_GetHistory" />
+    <bpmn:sequenceFlow id="Flow_07a" sourceRef="Task_GetIdentity" targetRef="Gateway_ParallelJoin" />
+    <bpmn:sequenceFlow id="Flow_07b" sourceRef="Task_GetFinancials" targetRef="Gateway_ParallelJoin" />
+    <bpmn:sequenceFlow id="Flow_07c" sourceRef="Task_GetHistory" targetRef="Gateway_ParallelJoin" />
+    <bpmn:sequenceFlow id="Flow_08" sourceRef="Gateway_ParallelJoin" targetRef="Task_RecordCRUDMetrics" />
+    <bpmn:sequenceFlow id="Flow_09" sourceRef="Task_RecordCRUDMetrics" targetRef="Task_ComputeScore" />
+    <bpmn:sequenceFlow id="Flow_10" sourceRef="Task_ComputeScore" targetRef="Task_RecordScoreMetric" />
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_RecordScoreMetric" targetRef="Task_MakeDecision" />
+    <bpmn:sequenceFlow id="Flow_12" sourceRef="Task_MakeDecision" targetRef="Task_RecordDecisionMetric" />
+    <bpmn:sequenceFlow id="Flow_13" sourceRef="Task_RecordDecisionMetric" targetRef="Task_GenerateExplanations" />
+    <bpmn:sequenceFlow id="Flow_14" sourceRef="Task_GenerateExplanations" targetRef="Task_RecordExplanationMetric" />
+    <bpmn:sequenceFlow id="Flow_15" sourceRef="Task_RecordExplanationMetric" targetRef="Task_AssembleReport" />
+    <bpmn:sequenceFlow id="Flow_16" sourceRef="Task_AssembleReport" targetRef="Task_CalculateLatency" />
+    <bpmn:sequenceFlow id="Flow_17" sourceRef="Task_CalculateLatency" targetRef="Task_RecordTotalMetric" />
+    <bpmn:sequenceFlow id="Flow_18" sourceRef="Task_RecordTotalMetric" targetRef="Task_LogCacheStats" />
+    <bpmn:sequenceFlow id="Flow_19" sourceRef="Task_LogCacheStats" targetRef="EndEvent_Success" />
+    <bpmn:serviceTask id="Task_LogCacheStats" name="Log Cache Statistics (hit rate %)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="log-cache-stats" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_18</bpmn:incoming>
+      <bpmn:outgoing>Flow_19</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ErrorMerge" name="Merge Errors">
+      <bpmn:incoming>Flow_Error1</bpmn:incoming>
+      <bpmn:incoming>Flow_Error2</bpmn:incoming>
+      <bpmn:incoming>Flow_Error3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Error4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_LogError" name="Log Error with&#10;Correlation ID">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="log-error" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Error4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Error5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndEvent_NotFound" name="Propagate&#10;ClientNotFoundFault">
+      <bpmn:incoming>Flow_Error5</bpmn:incoming>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_NotFoundEnd" errorRef="Error_NotFound" />
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_CalculateLatency" name="Calculate Total Latency">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="calculate-latency" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_16</bpmn:incoming>
+      <bpmn:outgoing>Flow_17</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_AssembleReport" name="Assemble SolvencyReport&#10;(identity + financials + history + score + status + explanations)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="assemble-report" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_RecordTotalMetric" name="Record VerifySolvency Metric">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="record-total-metric" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_17</bpmn:incoming>
+      <bpmn:outgoing>Flow_18</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndEvent_Success" name="Return SolvencyReport">
+      <bpmn:incoming>Flow_19</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:textAnnotation id="Annotation_Decision">
+      <bpmn:text>Solvency Decision Rule:
+solvent = (score ≥ 700) AND (monthlyIncome &gt; monthlyExpenses)
+Both conditions must be TRUE</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_Decision" sourceRef="Annotation_Decision" targetRef="Task_MakeDecision" />
+  </bpmn:process>
+  <bpmn:error id="Error_ValidationError" name="ClientValidationError" errorCode="Client.ValidationError" />
+  <bpmn:error id="Error_NotFound" name="ClientNotFoundFault" errorCode="Client.NotFound" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_SolvencyVerification">
+      <bpmndi:BPMNShape id="Participant_Orchestrator_di" bpmnElement="Participant_Orchestrator" isHorizontal="true">
+        <dc:Bounds x="160" y="80" width="2200" height="1000" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="232" y="192" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="208" y="235" width="84" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GenerateCorrelationID_di" bpmnElement="Task_GenerateCorrelationID">
+        <dc:Bounds x="320" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ValidateClientID_di" bpmnElement="Task_ValidateClientID">
+        <dc:Bounds x="470" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ValidPattern_di" bpmnElement="Gateway_ValidPattern" isMarkerVisible="true">
+        <dc:Bounds x="625" y="185" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="610" y="155" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_ValidationError_di" bpmnElement="EndEvent_ValidationError">
+        <dc:Bounds x="632" y="312" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="608" y="355" width="85" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_StartTimer_di" bpmnElement="Task_StartTimer">
+        <dc:Bounds x="730" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ParallelSplit_di" bpmnElement="Gateway_ParallelSplit">
+        <dc:Bounds x="895" y="185" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GetIdentity_di" bpmnElement="Task_GetIdentity">
+        <dc:Bounds x="1010" y="100" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GetFinancials_di" bpmnElement="Task_GetFinancials">
+        <dc:Bounds x="1010" y="200" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GetHistory_di" bpmnElement="Task_GetHistory">
+        <dc:Bounds x="1010" y="300" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ParallelJoin_di" bpmnElement="Gateway_ParallelJoin">
+        <dc:Bounds x="1195" y="215" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordCRUDMetrics_di" bpmnElement="Task_RecordCRUDMetrics">
+        <dc:Bounds x="1310" y="200" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ComputeScore_di" bpmnElement="Task_ComputeScore">
+        <dc:Bounds x="1470" y="200" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordScoreMetric_di" bpmnElement="Task_RecordScoreMetric">
+        <dc:Bounds x="230" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_MakeDecision_di" bpmnElement="Task_MakeDecision">
+        <dc:Bounds x="390" y="450" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordDecisionMetric_di" bpmnElement="Task_RecordDecisionMetric">
+        <dc:Bounds x="570" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GenerateExplanations_di" bpmnElement="Task_GenerateExplanations">
+        <dc:Bounds x="730" y="450" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordExplanationMetric_di" bpmnElement="Task_RecordExplanationMetric">
+        <dc:Bounds x="910" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_LogCacheStats_di" bpmnElement="Task_LogCacheStats">
+        <dc:Bounds x="1720" y="450" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ErrorMerge_di" bpmnElement="Gateway_ErrorMerge" isMarkerVisible="true">
+        <dc:Bounds x="1175" y="725" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1168" y="782" width="65" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_LogError_di" bpmnElement="Task_LogError">
+        <dc:Bounds x="1330" y="710" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_NotFound_di" bpmnElement="EndEvent_NotFound">
+        <dc:Bounds x="1512" y="732" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1486" y="775" width="90" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CalculateLatency_di" bpmnElement="Task_CalculateLatency">
+        <dc:Bounds x="1350" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AssembleReport_di" bpmnElement="Task_AssembleReport">
+        <dc:Bounds x="1170" y="450" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RecordTotalMetric_di" bpmnElement="Task_RecordTotalMetric">
+        <dc:Bounds x="1580" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_Success_di" bpmnElement="EndEvent_Success">
+        <dc:Bounds x="1922" y="472" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1901" y="515" width="78" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Annotation_Decision_di" bpmnElement="Annotation_Decision">
+        <dc:Bounds x="230" y="650" width="300" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryError_History_di" bpmnElement="BoundaryError_History">
+        <dc:Bounds x="1112" y="362" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148" y="353" width="65" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryError_Financials_di" bpmnElement="BoundaryError_Financials">
+        <dc:Bounds x="1112" y="262" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148" y="253" width="65" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryError_Identity_di" bpmnElement="BoundaryError_Identity">
+        <dc:Bounds x="1112" y="162" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148" y="153" width="65" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Error1_di" bpmnElement="Flow_Error1">
+        <di:waypoint x="1130" y="198" />
+        <di:waypoint x="1130" y="750" />
+        <di:waypoint x="1175" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Error2_di" bpmnElement="Flow_Error2">
+        <di:waypoint x="1130" y="298" />
+        <di:waypoint x="1130" y="750" />
+        <di:waypoint x="1175" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Error3_di" bpmnElement="Flow_Error3">
+        <di:waypoint x="1130" y="398" />
+        <di:waypoint x="1130" y="750" />
+        <di:waypoint x="1175" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Error4_di" bpmnElement="Flow_Error4">
+        <di:waypoint x="1225" y="750" />
+        <di:waypoint x="1330" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Error5_di" bpmnElement="Flow_Error5">
+        <di:waypoint x="1430" y="750" />
+        <di:waypoint x="1512" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_01_di" bpmnElement="Flow_01">
+        <di:waypoint x="268" y="210" />
+        <di:waypoint x="320" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_02_di" bpmnElement="Flow_02">
+        <di:waypoint x="420" y="210" />
+        <di:waypoint x="470" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_03_di" bpmnElement="Flow_03">
+        <di:waypoint x="570" y="210" />
+        <di:waypoint x="625" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_04_Yes_di" bpmnElement="Flow_04_Yes">
+        <di:waypoint x="675" y="210" />
+        <di:waypoint x="730" y="210" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="692" y="192" width="23" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_04_No_di" bpmnElement="Flow_04_No">
+        <di:waypoint x="650" y="235" />
+        <di:waypoint x="650" y="312" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="658" y="271" width="17" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_05_di" bpmnElement="Flow_05">
+        <di:waypoint x="830" y="210" />
+        <di:waypoint x="895" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_06a_di" bpmnElement="Flow_06a">
+        <di:waypoint x="920" y="185" />
+        <di:waypoint x="920" y="140" />
+        <di:waypoint x="1010" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_06b_di" bpmnElement="Flow_06b">
+        <di:waypoint x="945" y="210" />
+        <di:waypoint x="977" y="210" />
+        <di:waypoint x="977" y="240" />
+        <di:waypoint x="1010" y="240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_06c_di" bpmnElement="Flow_06c">
+        <di:waypoint x="920" y="235" />
+        <di:waypoint x="920" y="340" />
+        <di:waypoint x="1010" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_07a_di" bpmnElement="Flow_07a">
+        <di:waypoint x="1130" y="140" />
+        <di:waypoint x="1220" y="140" />
+        <di:waypoint x="1220" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_07b_di" bpmnElement="Flow_07b">
+        <di:waypoint x="1130" y="240" />
+        <di:waypoint x="1195" y="240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_07c_di" bpmnElement="Flow_07c">
+        <di:waypoint x="1130" y="340" />
+        <di:waypoint x="1220" y="340" />
+        <di:waypoint x="1220" y="265" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_08_di" bpmnElement="Flow_08">
+        <di:waypoint x="1245" y="240" />
+        <di:waypoint x="1310" y="240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_09_di" bpmnElement="Flow_09">
+        <di:waypoint x="1410" y="240" />
+        <di:waypoint x="1470" y="240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1590" y="240" />
+        <di:waypoint x="2050" y="240" />
+        <di:waypoint x="2050" y="910" />
+        <di:waypoint x="280" y="910" />
+        <di:waypoint x="280" y="530" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="330" y="490" />
+        <di:waypoint x="390" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_12_di" bpmnElement="Flow_12">
+        <di:waypoint x="510" y="490" />
+        <di:waypoint x="570" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_13_di" bpmnElement="Flow_13">
+        <di:waypoint x="670" y="490" />
+        <di:waypoint x="730" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_14_di" bpmnElement="Flow_14">
+        <di:waypoint x="850" y="490" />
+        <di:waypoint x="910" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_15_di" bpmnElement="Flow_15">
+        <di:waypoint x="1010" y="490" />
+        <di:waypoint x="1170" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_16_di" bpmnElement="Flow_16">
+        <di:waypoint x="1290" y="490" />
+        <di:waypoint x="1350" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_17_di" bpmnElement="Flow_17">
+        <di:waypoint x="1450" y="490" />
+        <di:waypoint x="1580" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_18_di" bpmnElement="Flow_18">
+        <di:waypoint x="1680" y="490" />
+        <di:waypoint x="1720" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_19_di" bpmnElement="Flow_19">
+        <di:waypoint x="1840" y="490" />
+        <di:waypoint x="1922" y="490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_Decision_di" bpmnElement="Association_Decision">
+        <di:waypoint x="450" y="530" />
+        <di:waypoint x="380" y="650" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_Formula_di" bpmnElement="Association_Formula">
+        <di:waypoint x="1676" y="290" />
+        <di:waypoint x="1590" y="263" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_SLA_di" bpmnElement="Association_SLA">
+        <di:waypoint x="666" y="650" />
+        <di:waypoint x="775" y="250" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_Cache_di" bpmnElement="Association_Cache">
+        <di:waypoint x="910" y="330" />
+        <di:waypoint x="920" y="235" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="Annotation_Formula_di" bpmnElement="Annotation_Formula">
+        <dc:Bounds x="1630" y="290" width="320" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Annotation_SLA_di" bpmnElement="Annotation_SLA">
+        <dc:Bounds x="520" y="650" width="280" height="95" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Annotation_Cache_di" bpmnElement="Annotation_Cache">
+        <dc:Bounds x="760" y="330" width="300" height="100" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
